@@ -1,15 +1,45 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: 'TP3 : Modèle de Poisson et mélanges'
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
 ---
 
 This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*.
+
+# Première partie
+
+On suppose les observations et de loi de Poisson de paramètre $\theta > 0$ 
+
+1) On cherche la loi générative des données dans ce modèle.
+
+$p(y|\theta) = p(y_1, y_2, ... y_n| \theta) = \displaystyle \prod_{i=1}^n \dfrac{\theta^{y_i}}{y_i!}e^{\theta}$
+
+2) On suppose $p(\theta) \propto \dfrac{1}{\theta}$ avec $\theta > 0$.
+
+On détermine la loi à posteriori du paramètre $\theta$.
+
+\begin{eqnarray*}
+p(\theta | y) & \propto & p(y|\theta)p(\theta) \\
+& \propto & \theta^{\sum_{i=1}^n y_i - 1} e^{-n\theta} \displaystyle \prod_{i=1}^n \dfrac{1}{y_i!} \\
+& \propto & \theta^{Y-1} e^{-n\theta}
+\end{eqnarray*}
+
+Donc $\theta|y \sim$ Gamma($Y$, $n$).
+
+On a que l'espérance de la loi à posteriori vaut $E[\theta | y ] = \dfrac{Y}{n} = \dfrac{1}{n} \displaystyle \sum_{i=0}^n y_i$.
+
+3) 4) 5) 6) Algorithme de Métropolis-Hasting
 
 ```{r}
+# Problème rencontré pour l'algorithme de Métropolis-Hasting permet de "régler" ce problème :
+options(warn=-1)
 
-metropolis <- function(theta_init, nb_iter, y) {
+# Algorithme de Métropolis-Hasting
+metropolis <- function(theta_init, nb_iter, y, burn) {
   
   n <- length(y)
   theta <- theta_init
@@ -20,8 +50,19 @@ metropolis <- function(theta_init, nb_iter, y) {
     
     theta_etoile <- rexp(1, rate = 1/theta)
     
-    R <- dgamma(theta_etoile, n, sum(y)) * dexp(theta, 1/theta_etoile) / (dgamma(theta, n, sum(y)) * dexp(theta_etoile, 1/theta))
-                                                      
+    denom <- (dgamma(theta, sum(y), n) * dexp(theta_etoile, 1/theta))
+    
+    if (is.nan(denom)) {
+      #print("Il y a eu un problème à l'éxécution. Néanmoins, l'algorithme de Métropolis s'est relancé automatiquement.")
+      return(metropolis(theta_init, nb_iter, y, burn))
+    }
+    
+    if (denom == 0) {
+      R <- 1
+    } else {
+       R <- dgamma(theta_etoile, sum(y), n) * dexp(theta, 1/theta_etoile) / denom
+    }
+  
     u <- runif(1, 0, 1)
     
     if (u <= R) {
@@ -30,27 +71,357 @@ metropolis <- function(theta_init, nb_iter, y) {
     
     vect_theta[i] <- theta
     
+    
   }
   
-  return(vect_theta)
+  return(vect_theta[burn:nb_iter])
 }
 
-
-theta_init <- 0.2
-y <- rpois(5, 10)
-nb_iter <- 5000
+# Valeur initiale de theta pour metropolis-hasting
+theta_init <- 1
 
 
-result <- metropolis(theta_init, nb_iter, y)
-hist(result, prob=TRUE)
-lines(seq(0,0.8, length.out = 1000), dgamma(seq(0, 0.8, length.out = 1000), length(y), sum(y)))
+# y ensemble de valeur de loi de Poisson
+# theta_theo <- 5 # à décommenter pour tester si ça marche bien avec une loi de Poisson
+# y <- rpois(80, theta_theo) # à décommenter de même
+y <- scan("tp3mpa.data")
+nb_iter <- 10000
+
+# Nbr de valeur souhaité burn << nb_iter 
+burn <- floor(nb_iter/10)
 
 
+result <- metropolis(theta_init, nb_iter, y, burn)
+hist(result, prob=TRUE, main = "Histogramme de theta via Metropolis-Hasting", xlab = "theta expériemental", ylab = "Quantité")
+lines(seq(min(result), max(result), length.out = 1000), dgamma(seq(min(result), max(result), length.out = 1000), sum(y), length(y)))
 
-plot(result)
+
+plot(result, main = "Evolution de theta expérimental dans l'algorithme de Métropolis-Hasting", xlab = "Numéro d'itération [1, nb_iter]", ylab = "theta expérimental")
+
+# Moyenne de theta à posteriori
+moy_theta <- mean(result)
+print("Moyenne de theta à posteriori :")
+moy_theta
+
+# Médiane de theta à posteriori
+median_theta <- median(result)
+print("Médiane de theta à posteriori:")
+median_theta
+
+# Intervalle de confiance à 95% de la moyenne de theta à posteriori
+print("Intervalle de confiance à 95% de la moyenne de theta à posteriori")
+t.test(result)$conf.int
+
+simulation_predictive <- function(nbr_data_voulu, y) {
+  
+  theta <- rgamma(1, sum(y), length(y))
+  y_prediction <- rpois(nbr_data_voulu, theta)
+  
+  return(y_prediction)
+}
+
+nbr_data_voulu <- 80
+prediction <- simulation_predictive(nbr_data_voulu , y)
+
+par(mfrow = c(1,2))
+hist(y, prob=TRUE, main = "Histogramme des données fournies", xlab = "y donné", ylab = "Quantité")
+hist(prediction, prob=TRUE, main = "Histogramme des données prédites", xlab = "y prédit", ylab = "Quantité")
+
 
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+On constate que l'histogramme des données prédites ne ressemble pas à l'histogramme des données fournies. Le pic vers la moyenne $\sim 11$ semble correspondre cependant on voit que pour les valeurs proches de zéro et plus grandes que 20 il y a un souci.
+Il semble alors préférable de ne pas supposer que l'ensemble des données proviennent d'une unique loi de Poisson.
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+# Seconde partie
+
+On suppose désormais les $n$ données indépendantes et provenant de $K$ sources poissionniennes de moyennes inconnues 
+$\theta = (\theta_1, \theta_2 ..., \theta_K)$. On définit les les $z = (z_1, z_2, ..., z_n)$ où $z_i \in \{1, K\}$ et le modèle $(y, z, \theta)$ ainsi :
+
+$$p(y_i|z_i, \theta) = (\theta_{z_i})^{y_i} e^{-\theta_{z_i}}/y_i!$$
+$$p(z) \propto 1$$
+
+$$p(\theta_k) \propto 1/\theta_k$$
+
+1) On détermine la loi à posteriori des $y$.
+
+\begin{eqnarray*}
+p(y|z, \theta) & = & \displaystyle \prod_{i=1}^n p(y_i|z_i, \theta) \\
+& = & \displaystyle \prod_{k=1}^n \displaystyle \prod_{i \in I_k} p(y_i|z_i, \theta) \\
+& = & \displaystyle \prod_{k=1}^n \displaystyle \prod_{i \in I_k} (\theta_{k})^{y_i} e^{-\theta_{k}}/y_i!
+\end{eqnarray*}
+
+2) On souhaite déterminer la loi à posteriori de $(z, \theta)$.
+
+\begin{eqnarray*}
+p(z,\theta|y) & \propto & p(y|z, \theta)p(z, \theta) \\
+& \propto & p(y|z, \theta)p(z)p(\theta) \text{ par indépendance de $\theta$ et $z$}\\
+& \propto & p(y|z, \theta) \times 1 \times p(\theta)\\
+& \propto & \displaystyle \prod_{k=1}^n \dfrac{1}{\theta_k} \displaystyle \prod_{i \in I_k} (\theta_{k})^{y_i} e^{-\theta_{k}}/y_i!
+\end{eqnarray*}
+
+3) On veut déterminer $p(z_i = k | y, \theta)$.
+
+On cherche en réalité la probabilité que $z_i = k$ sachant $y$ et $\theta$. Cela revient à chercher la probabilité que $y_i$ provienne de la loi de Poisson de paramètre $\theta_k$. On peut donc écrire :
+
+$$p(z_i = k | y, \theta) = p(z_i = k | y_i, \theta)$$
+
+Cela nous permet donc de trouver plus facilement une solution :
+
+\begin{eqnarray*}
+p(z_i = k|y, \theta) & = & p(y_i|z_i=k, \theta)\underbrace{p(z_i=k| \theta)}_{=1} / p(y_i|\theta) \\
+& = & p(y_i|z_i=k, \theta) / \sum_{k=1}^K p(y_i|\theta, z_i=k) \underbrace{p(z_i = k|\theta)}_{=1}\\
+& = &  ((\theta_{k})^{y_i} e^{-\theta_{k}}/y_i!) / (\sum_{k=1}^K (\theta_{k})^{y_i} e^{-\theta_{k}}/y_i!)\\
+& = & (\theta_{k})^{y_i} e^{-\theta_{k}} / \sum_{k=1}^K (\theta_{k})^{y_i} e^{-\theta_{k}}
+\end{eqnarray*}
+
+4) On a le développement suivant :
+
+\begin{eqnarray*}
+p(\theta_k|\theta_{-k},y,z) & = & \displaystyle \prod_{i \in I_k} p(\theta_k|\theta_{-k}, y_i, z_i = k) \\
+& \propto & \displaystyle \prod_{i \in I_k} p(y_i|\theta,z_i)\underbrace{p(z_i|\theta_k, \theta_{-k})}_{p(z_i|\theta) = p(z_i) = 1} \underbrace{p(\theta_k| \theta_{-k})}_{p(\theta_k)} \\
+& \propto & \displaystyle \prod_{i \in I_k} p(y_i|\theta,z_i)p(\theta_k) \\
+& \propto & \theta_k^{n_k \bar{y_k}-1} e^{-n_k \theta_{k}}
+\end{eqnarray*}
+
+Donc finalement on a $\theta_k|\theta_{-k},y,z \sim$ Gamma($n_k \bar{x_k}$, $n_k$).
+
+5) 6) On souhaite réaliser un algorithme de Gibbs permettant de simuler la loi à posteriori. En d'autres termes, on souhaite évaluer le vecteur de taille $K+n$ $(\theta, z)$.
+
+On cherche donc à simuler $p(\theta, z|y)$. A noter que l'on laisse le choix à l'utilisateur du nombre $K$ c'est à dire du nombre de mélanges.
+
+On peut donc commencer par initialiser le vecteur $\theta$ ou $z$ au choix. On a choisi d'initialiser $z$ pour implémenter notre algorithme. Attention, si vous choisissez d'implémenter en initialisant $\theta$ il faudra inverser l'étape a) et b) de l'algorithme. 
+
+L'algorithme va se dérouler ainsi :
+
+Pour un nombre d'itération $N$ voulu et de préférence assez "grand", on effectue la boucle suivante : 
+
+   a) On simule $p(\theta|z, y)$ ce qui représente $K$ simulations de loi Gamma.
+   b) On simule $p(z| \theta,y)$ ce qui représente $n$ simulations.
+
+Cet algorithme effectuera alors $N\times(K+n)$ simulations.
+
+Voici l'implémentation de l'algorithme décris précédemment : (pour que le code soit plus facile à lire et à comprendre nous avons divisé le code en $4$ fonctions)
+
+
+```{r}
+
+simulation_theta <- function(z, y, K) {
+  new_theta <- c(1:K)
+  for (k in 1:K) {
+    nk <- length(z[z==k])
+    yk <- sum(y[z==k])/nk
+    new_theta[k] <- rgamma(1, nk*yk, nk)
+  }
+ return(new_theta)
+}
+
+calc_sum_prob_yi <- function(yi, theta, K) {
+  sum_prob_yi <- 0
+  for (k in 1:K) {
+    sum_prob_yi <- sum_prob_yi + theta[k]^yi * exp(-theta[k])
+  }
+  return(sum_prob_yi)
+}
+
+simulation_z <- function(theta, y, K) {
+  n <- length(y)
+  new_z <- c(1:n)
+  for (i in 1:n) {
+    
+    p_zi_equal <- c(1:K)
+    total_i <- calc_sum_prob_yi(y[i], theta, K)
+    for(k in 1:K) {
+      p_zi_equal[k] <-(theta[k]^y[i]*exp(-theta[k]))/total_i 
+    }
+    new_z[i] <- sample(1:K, size = 1, replace = T, prob = p_zi_equal)
+  }
+  return(new_z)
+}
+
+gibbs <- function(nb_iter, K, y, z_init) {
+  # Création des vecteurs theta et z
+  theta <- c(1:K)
+  theta_k <- c()
+  z <- z_init
+  for (i in 1:nb_iter) {
+    theta <- simulation_theta(z, y, K)
+    theta_k <- c(theta_k, theta)
+    z <- simulation_z(theta, y, K)
+  }
+  return(c(theta_k, z))
+}
+
+
+#DOC de la fonction main_melange :
+# nb_iter désigne le nombre de tour dans la boucle principale de l'algorithme de Gibbs
+# K désigne le nombre de mélange 
+# burn désigne le nombre de première valeur qui ne seront pas pris en compte pour 
+# estimer les moyennes de theta_k pour k = 1 -> K
+main_melange <- function(nb_iter, K, burn, prediction) {
+  print("K = ")
+  print(K)
+  
+  # Données fournies
+  y <- scan("tp3mpa.data")
+  n <- length(y)
+  
+  # Initialisation
+  z_init <- sample(1:K, size = n, replace=T)
+  
+  result <- gibbs(nb_iter, K, y, z_init)
+  theta <- result[1:(nb_iter*K)]
+  moy_theta_k <- c(1:K)
+  for (k in 0:(K-1)) {
+    theta_k_temp <- theta[c(1:(nb_iter*K)) %% K == k]
+    moy_theta_k[k+1] <- mean(theta_k_temp[burn:nb_iter]) # burn intervient ici
+    #print(theta_k_temp)
+  }
+  z_exp <- result[(nb_iter*K+1):(nb_iter*K+n)]
+  
+  print("Espérance de theta_k sachant y :")
+  for (k in 1:K) {
+    print(moy_theta_k[k])
+  }
+  
+  print("Proportion de chacune des composantes du mélange (trié dans l'ordre k = 1 -> K) :")
+  z_prop <- c(1:K)
+  for (k in 1:K) {
+    z_prop[k] <- length(z_exp[z_exp == k])
+  }
+  print(z_prop)
+  
+  if (prediction) {
+    return(c(moy_theta_k, z_prop))
+  }
+  
+}
+
+main_melange(1000, 3, 250, F)
+```
+
+7) On va à présent voir pour quel $K$ le modèle semble être le plus pertinent. Nous allons donc effectuer plusieurs fois l'algorithme de Gibbs en faisant varier $K$.
+
+```{r}
+#---------- K = 1 -----------------------
+main_melange(1000, 1, 250, F)
+
+```
+
+  Il est rassurant de constater que pour $K=1$ on retrouve bien en moyenne $\sim 11$, ce qui signifie que cet algorithme est en quelque sorte une extension du premier. On sait déjà que ce modèle est mauvais, il n'y a rien à ajouter de particulier ici.
+
+```{r}
+
+# --------- K = 2 -----------------------
+y <- scan("tp3mpa.data")
+n <- length(y)
+K <- 2
+tools <- main_melange(1000, K, 250, T)
+
+moy_theta_K <- tools[1:K]
+z_prop_K <- tools[(K+1):(2*K)]
+
+proba <- z_prop_K/n
+y_predictive <- c(1:n)
+for (i in 1:n) {
+  k <- sample(1:K, size = 1, replace = T, prob = proba)
+  y_predictive[i] <- rpois(1, moy_theta_K[k])
+}
+hist(y_predictive, proba =TRUE, main = "Histogramme des y prédits", xlab = "Valeur de y", ylab = "Quantité")
+
+hist(y, prob = TRUE, main = "Histogramme des y fournis")
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[1]), col ="blue", lwd = 2)
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[2]), col = "red", lwd = 2)
+
+```
+
+
+
+```{r}
+
+# --------- K = 3 -----------------------
+y <- scan("tp3mpa.data")
+n <- length(y)
+# Au vu de la dispertion des différentes valeurs de $y$ (via plot($y$)), on sent bien que K = 3 risque de bien correspondre.
+K <- 3
+
+tools <- main_melange(1000, K, 250, T)
+plot(y, main = "Valeur de y data")
+
+moy_theta_K <- sort(tools[1:K])
+z_prop_K <- tools[(K+1):(2*K)]
+
+proba <- z_prop_K/n
+y_predictive <- c(1:n)
+for (i in 1:(2*n)) {
+  k <- sample(1:K, size = 1, replace = T, prob = c(1/4, 1/2, 1/4))
+  y_predictive[i] <- rpois(1, moy_theta_K[k])
+}
+hist(y_predictive, prob =TRUE, main = "Histogramme des y prédits", xlab = "Valeur de y", ylab = "Quantité")
+
+hist(y, prob = TRUE, main = "Histogramme des y fournis")
+lines(seq(0, 100), dpois(seq(0, 100), moy_theta_K[1]), col ="blue", lwd = 2)
+lines(seq(0, 100), dpois(seq(0, 100), moy_theta_K[2]), col = "red", lwd = 2)
+lines(seq(0, 100), dpois(seq(0, 100), moy_theta_K[3]), col = "yellow", lwd = 2)
+
+```
+
+```{r}
+
+# --------- K = 4 -----------------------
+y <- scan("tp3mpa.data")
+n <- length(y)
+K <- 4
+
+main_melange(1000, K, 250, T)
+
+
+
+tools <- main_melange(1000, K, 250, T)
+
+moy_theta_K <- tools[1:K]
+z_prop_K <- tools[(K+1):(2*K)]
+
+proba <- z_prop_K/n
+y_predictive <- c(1:n)
+for (i in 1:n) {
+  k <- sample(1:K, size = 1, replace = T, prob = proba)
+  y_predictive[i] <- rpois(1, moy_theta_K[k])
+}
+hist(y_predictive, prob =TRUE, main = "Histogramme des y prédits", xlab = "Valeur de y", ylab = "Quantité")
+
+hist(y, proba = TRUE, main = "Histogramme des y fournis")
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[1]), col ="blue", lwd = 2)
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[2]), col = "red", lwd = 2)
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[3]), col = "yellow", lwd = 2)
+lines(seq(0, 40), dpois(seq(0, 40), moy_theta_K[4]), col = "green", lwd = 2)
+
+```
+
+```{r}
+
+# --------- K = 5 -----------------------
+
+#Test supplémentaire pour des valeurs plus grandes de K
+
+main_melange(1000, 5, 250, F)
+
+```
+
+```{r}
+
+# --------- K = 10 -----------------------
+
+main_melange(1000, 10, 250, F)
+
+```
+
+Bilan :
+
+Au vu des différents résultats pour des $K$ différents, on conclut que le meilleur modèle est celui pour $K=3$. 
+
+En effet, pour $K<3$ l'histogramme des données prédites ne correspond pas du tout avec l'histogramme des données fournies. On conlut rapidement que ces modèles ne sont pas pertinents.
+
+Pour $K>3$, il est intéressant de constater que l'on obtient des valeurs de $\theta_k$ semblables à celle de $K=3$ et où celle(s) en plus valent $\sim 11$. Ce n'est pas étonnant puisque c'est là où $y$ données a le plus de valeurs. L'algorithme nous confirme alors que le modèle $K=3$ est le plus pertinent puisque pour des $K$ plus élevés il y a superposition de plusieurs lois de Poisson de même moyenne $\theta_k \sim 11$ (vous pouvez tester avec $K=4$ ou $K=5$ grâce aux codes juste au dessus ; pour $K=3$ on obtient deux lois de Poisson de moyenne $\sim 11$ et pour $K=4$ on obtient comme on peut s'y attendre trois lois de Poisson de moyenne $\sim 11$). Cela tend à se dissiper pour des $K$ vraiment très grand mais dans ces cas là le modèle tend à être anarchique.
+
+Cependant, même si le modèle pour $K=3$ semble être celui qui correspond le plus on est en droit de le critiquer tout de même. En effet, lorsque l'on prédit des nouvelles valeurs de $y$, on constate qu'il y a plus de valeurs proches de zéro et de $20$ que dans les données fournies (voir histogramme des données prédites pour $K=3$, code éxécutable juste au dessus). On peut alors se demander finalement si ces données ne proviennent pas d'un autre type de mélange avec d'autres lois éventuellement différentes.
